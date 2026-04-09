@@ -1,0 +1,204 @@
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <thread>
+#include <future>
+#include <mutex>
+#include <condition_variable>
+#include <unordered_map>
+#include <functional>
+#include <atomic>
+#include <memory>
+#include <stdexcept>
+#include <chrono>
+
+using namespace std;
+
+class ThreadPool {
+private:
+    struct IResult {
+        virtual ~IResult() = default;
+    };
+
+    template <typename T>
+    struct ResultHolder : IResult {
+        future<T> result;
+        ResultHolder(future<T>&& f) : result(move(f)) {}
+    };
+
+    vector<thread> workers;
+    queue<function<void()>> tasks;
+
+    unordered_map<size_t, shared_ptr<IResult>> results;
+
+    mutex tasksMutex;
+    mutex resultsMutex;
+    condition_variable cv;
+
+    bool isStarted;
+    bool stopFlag;
+    size_t threadCount;
+    atomic<size_t> nextId;
+
+    void workerFunction() {
+        while (true) {
+            function<void()> task;
+
+            {
+                unique_lock<mutex> lock(tasksMutex);
+                cv.wait(lock, [this]() {
+                    return stopFlag || !tasks.empty();
+                });
+
+                if (stopFlag && tasks.empty()) {
+                    return;
+                }
+
+                task = move(tasks.front());
+                tasks.pop();
+            }
+
+            task();
+        }
+    }
+
+public:
+    ThreadPool(size_t count) {
+        threadCount = count;
+        isStarted = false;
+        stopFlag = false;
+        nextId = 1;
+    }
+
+    ~ThreadPool() {
+        stop();
+    }
+
+    void start() {
+        if (isStarted) {
+            return;
+        }
+
+        stopFlag = false;
+        isStarted = true;
+
+        for (size_t i = 0; i < threadCount; i++) {
+            workers.emplace_back(&ThreadPool::workerFunction, this);
+        }
+    }
+
+    void stop() {
+        if (!isStarted) {
+            return;
+        }
+
+        {
+            lock_guard<mutex> lock(tasksMutex);
+            stopFlag = true;
+        }
+
+        cv.notify_all();
+
+        for (size_t i = 0; i < workers.size(); i++) {
+            if (workers[i].joinable()) {
+                workers[i].join();
+            }
+        }
+
+        workers.clear();
+        isStarted = false;
+    }
+
+    template <typename Func, typename... Args>
+    size_t addTask(Func func, Args... args) {
+        using ReturnType = invoke_result_t<Func, Args...>;
+
+        if (!isStarted) {
+            throw runtime_error("ThreadPool is not started");
+        }
+
+        auto bindedTask = bind(func, args...);
+        auto packaged = make_shared<packaged_task<ReturnType()>>(bindedTask);
+        future<ReturnType> f = packaged->get_future();
+
+        size_t id = nextId++;
+
+        {
+            lock_guard<mutex> lock(resultsMutex);
+            results[id] = make_shared<ResultHolder<ReturnType>>(move(f));
+        }
+
+        {
+            lock_guard<mutex> lock(tasksMutex);
+            tasks.push([packaged]() {
+                (*packaged)();
+            });
+        }
+
+        cv.notify_one();
+
+        return id;
+    }
+
+    template <typename T>
+    T requestResult(size_t id) {
+        shared_ptr<IResult> basePtr;
+
+        {
+            lock_guard<mutex> lock(resultsMutex);
+            if (results.find(id) == results.end()) {
+                throw runtime_error("Wrong task id");
+            }
+
+            basePtr = results[id];
+        }
+
+        auto realPtr = dynamic_pointer_cast<ResultHolder<T>>(basePtr);
+
+        if (realPtr == nullptr) {
+            throw runtime_error("Wrong result type");
+        }
+
+        T value = realPtr->result.get();
+
+        {
+            lock_guard<mutex> lock(resultsMutex);
+            results.erase(id);
+        }
+
+        return value;
+    }
+};
+
+int calcSquare(int x) {
+    this_thread::sleep_for(chrono::milliseconds(100));
+    return x * x;
+}
+
+int main() {
+    try {
+        ThreadPool pool(4);
+        pool.start();
+
+        int N = 10;
+        vector<size_t> ids;
+
+        for (int i = 1; i <= N; i++) {
+            size_t id = pool.addTask(calcSquare, i);
+            ids.push_back(id);
+        }
+
+        cout << "Results:" << endl;
+        for (int i = 0; i < N; i++) {
+            int res = pool.requestResult<int>(ids[i]);
+            cout << "Task " << ids[i] << " -> " << res << endl;
+        }
+
+        pool.stop();
+    }
+    catch (const exception& e) {
+        cout << "Error: " << e.what() << endl;
+    }
+
+    return 0;
+}
