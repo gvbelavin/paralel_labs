@@ -24,10 +24,10 @@ double norm2(const vector<double>& v)
 
 int main()
 {
-    const int N = 3000;
-    const double tau = 0.0001;
+    const int N = 3800;
+    const double tau = 0.00001;
     const double eps = 1e-5;
-    const int max_iter = 200000;
+    const int max_iter = 250000;
 
     vector<vector<double>> A(N, vector<double>(N));
     vector<double> b(N), x(N, 0.0), x_new(N, 0.0), r(N, 0.0);
@@ -53,8 +53,9 @@ int main()
             #pragma omp for
             for (int i = 0; i < N; i++) {
                 double ax = 0.0;
-                for (int j = 0; j < N; j++)
+                for (int j = 0; j < N; j++) {
                     ax += A[i][j] * x[j];
+                }
                 r[i] = ax - b[i];
             }
 
