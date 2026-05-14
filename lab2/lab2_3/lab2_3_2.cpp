@@ -63,6 +63,7 @@ int main(int argc, char* argv[])
 
     vector<vector<double>> A(N, vector<double>(N));
     vector<double> b(N);
+    vector<double> x(N, 0.0), x_new(N, 0.0), r(N, 0.0);
     for (int i = 0; i < N; i++) {
         b[i] = N + 1.0;
         for (int j = 0; j < N; j++) {
