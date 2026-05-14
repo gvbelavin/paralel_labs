@@ -40,7 +40,7 @@ omp_sched_t parseSchedule(const string& name)
 
 int main(int argc, char* argv[])
 {
-    const int N = 3800;
+    const int N = 8500;
     const double tau = 0.00001;
     const double eps = 1e-5;
     const int max_iter = 250000;
