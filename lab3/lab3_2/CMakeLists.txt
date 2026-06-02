@@ -1,11 +1,19 @@
-cmake_minimum_required(VERSION 3.10)
-
-project(lab3_2 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(ClientServer CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(lab32 lab3_2.cpp)
-
 find_package(Threads REQUIRED)
-target_link_libraries(lab3_2 PRIVATE Threads::Threads)
+
+# ─── Основная программа ────────────────────────────────────────────
+add_executable(main main.cpp)
+
+target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(main PRIVATE Threads::Threads)
+
+# ─── Тестовая программа ────────────────────────────────────────────
+add_executable(test_runner test.cpp)
+
+target_link_libraries(test_runner PRIVATE Threads::Threads)
