@@ -55,7 +55,7 @@ void client_sin(Server<double>& server, int N) {
              << result << "\n";
     }
 
-    std::cout << "[Client 1] sin:  " << N << " tasks → client1_sin.txt\n";
+    std::cout << "[Client 1] sin:  " << N << " tasks in client1_sin.txt\n";
 }
 
 // ─── Клиент 2: sqrt(x)
@@ -91,7 +91,7 @@ void client_sqrt(Server<double>& server, int N) {
              << result << "\n";
     }
 
-    std::cout << "[Client 2] sqrt: " << N << " tasks → client2_sqrt.txt\n";
+    std::cout << "[Client 2] sqrt: " << N << " tasks in client2_sqrt.txt\n";
 }
 
 // ─── Клиент 3: pow(base, exp)
@@ -131,7 +131,7 @@ void client_pow(Server<double>& server, int N) {
              << result << "\n";
     }
 
-    std::cout << "[Client 3] pow:  " << N << " tasks → client3_pow.txt\n";
+    std::cout << "[Client 3] pow:  " << N << " tasks in client3_pow.txt\n";
 }
 
 int main() {
@@ -150,7 +150,6 @@ int main() {
 
     server.stop();
 
-    std::cout << "\nDone. Results saved to client1_sin.txt, "
-                 "client2_sqrt.txt, client3_pow.txt\n";
+    std::cout << "\nDone\n";
     return 0;
 }
