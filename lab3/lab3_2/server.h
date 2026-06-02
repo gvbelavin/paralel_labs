@@ -12,10 +12,6 @@
 #include <atomic>
 #include <stdexcept>
 
-// ═══════════════════════════════════════════════════════════════════
-//  ThreadPool — пул воркер-потоков, которые берут задачи из очереди
-//  Используется внутри Server<T> как механизм параллельного выполнения
-// ═══════════════════════════════════════════════════════════════════
 class ThreadPool {
 private:
     std::vector<std::thread>          workers;
@@ -69,15 +65,6 @@ public:
     }
 };
 
-
-// ═══════════════════════════════════════════════════════════════════
-//  Server<T> — шаблонный сервер с интерфейсом: start / stop /
-//              add_task / request_result
-//  Внутри использует ThreadPool для параллельного выполнения задач.
-//  Пара promise/future — механизм передачи результата между потоками:
-//    • promise.set_value()  — воркер кладёт результат (один раз)
-//    • future.get()         — клиент забирает результат (один раз)
-// ═══════════════════════════════════════════════════════════════════
 template <typename T>
 class Server {
 private:
@@ -89,21 +76,18 @@ private:
     };
 
     // Очередь задач, ожидающих выполнения
-    std::queue<std::shared_ptr<Task>>             taskQueue;
-    // Словарь: id → future  (клиент забирает результат отсюда)
-    // unordered_map: O(1) insert / erase / find
-    std::unordered_map<size_t, std::future<T>>    resultFutures;
+    std::queue<std::shared_ptr<Task>> taskQueue;
+    std::unordered_map<size_t, std::future<T>> resultFutures;
 
-    std::mutex              queueMutex;
-    std::mutex              resultsMutex;
+    std::mutex queueMutex;
+    std::mutex resultsMutex;
     std::condition_variable cv;
 
     std::atomic<bool>   running{false};
     std::atomic<size_t> nextId{1};
 
-    std::unique_ptr<ThreadPool> pool;   // ← ThreadPool внутри сервера
+    std::unique_ptr<ThreadPool> pool;
 
-    // Диспетчер: один поток читает taskQueue и отдаёт задачи в пул
     std::thread dispatchThread;
 
     void dispatchLoop() {
@@ -119,12 +103,10 @@ private:
                 taskQueue.pop();
             }
 
-            // Передаём задачу в ThreadPool — воркер выполнит её в своём потоке
-            // Захватываем task по значению (shared_ptr) — безопасно
             pool->submit([task]() {
                 try {
                     T result = task->func();
-                    task->promise.set_value(result);           // кладём один раз
+                    task->promise.set_value(result);
                 } catch (...) {
                     task->promise.set_exception(std::current_exception());
                 }
@@ -136,7 +118,7 @@ public:
     Server() = default;
     ~Server() { stop(); }
 
-    // threadCount — сколько потоков в пуле (по умолчанию = числу ядер)
+    // threadCount — сколько потоков в пуле
     void start(size_t threadCount = std::thread::hardware_concurrency()) {
         if (running) return;
         running = true;
@@ -153,9 +135,6 @@ public:
         if (pool) pool->shutdown();
     }
 
-    // Добавить задачу → вернуть id
-    // promise создаётся здесь, future сохраняется в map,
-    // promise уходит вместе с task в очередь диспетчеру → потом воркеру пула
     size_t add_task(std::function<T()> func) {
         size_t id = nextId++;
 
@@ -163,24 +142,21 @@ public:
         task->id     = id;
         task->func   = std::move(func);
 
-        // Получаем future ДО передачи promise в другой поток
-        std::future<T> fut = task->promise.get_future();   // связанная пара
+        std::future<T> fut = task->promise.get_future();
 
         {
             std::lock_guard<std::mutex> lock(resultsMutex);
-            resultFutures.emplace(id, std::move(fut));     // future → в map
+            resultFutures.emplace(id, std::move(fut));
         }
         {
             std::lock_guard<std::mutex> lock(queueMutex);
-            taskQueue.push(std::move(task));               // task (с promise) → в очередь
+            taskQueue.push(std::move(task));
         }
 
         cv.notify_one();
         return id;
     }
 
-    // Блокирующий: ждёт пока воркер не вызовет promise.set_value()
-    // future.get() вызывается строго ОДИН РАЗ — запись сразу удаляется из map
     T request_result(size_t id) {
         std::future<T> fut;
         {
@@ -188,9 +164,8 @@ public:
             auto it = resultFutures.find(id);
             if (it == resultFutures.end())
                 throw std::runtime_error("Unknown task id: " + std::to_string(id));
-            fut = std::move(it->second);    // забираем future из map
-            resultFutures.erase(it);        // удаляем — get() только один раз
+            fut = std::move(it->second);
+            resultFutures.erase(it);
         }
-        return fut.get();                   // ← единственный вызов get()
-    }
+        return fut.get();                   
 };

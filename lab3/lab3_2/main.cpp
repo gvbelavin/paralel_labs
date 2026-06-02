@@ -7,8 +7,6 @@
 #include <iomanip>
 #include "server.h"
 
-// ─── Шаблонные функции-задачи ───────────────────────────────────────────────
-
 template <typename T>
 T fun_sin(T arg) {
     return std::sin(arg);
@@ -24,26 +22,23 @@ T fun_pow(T base, T exp) {
     return std::pow(base, exp);
 }
 
-// ─── Клиент 1: sin(x) ──────────────────────────────────────────────────────
+// ─── Клиент 1: sin(x)
 
 void client_sin(Server<double>& server, int N) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> dist(-3.14159265, 3.14159265);
 
-    // Сначала добавляем все задачи — получаем id и запоминаем аргументы
     std::vector<std::pair<size_t, double>> tasks;
     tasks.reserve(N);
 
     for (int i = 0; i < N; i++) {
         double arg = dist(rng);
-        // Лямбда захватывает arg по значению — передаёт задачу серверу
         size_t id = server.add_task([arg]() -> double {
             return fun_sin<double>(arg);
         });
         tasks.emplace_back(id, arg);
     }
 
-    // Затем забираем результаты (блокируемся на каждом future.get())
     std::ofstream file("client1_sin.txt");
     file << std::fixed << std::setprecision(10);
     file << "=== CLIENT 1: sin(x) ===\n";
@@ -54,7 +49,7 @@ void client_sin(Server<double>& server, int N) {
     file << std::string(55, '-') << "\n";
 
     for (auto& [id, arg] : tasks) {
-        double result = server.request_result(id);  // future.get() внутри — один раз
+        double result = server.request_result(id);
         file << std::setw(8)  << id
              << std::setw(22) << arg
              << result << "\n";
@@ -63,7 +58,7 @@ void client_sin(Server<double>& server, int N) {
     std::cout << "[Client 1] sin:  " << N << " tasks → client1_sin.txt\n";
 }
 
-// ─── Клиент 2: sqrt(x) ─────────────────────────────────────────────────────
+// ─── Клиент 2: sqrt(x)
 
 void client_sqrt(Server<double>& server, int N) {
     std::mt19937 rng(123);
@@ -99,7 +94,7 @@ void client_sqrt(Server<double>& server, int N) {
     std::cout << "[Client 2] sqrt: " << N << " tasks → client2_sqrt.txt\n";
 }
 
-// ─── Клиент 3: pow(base, exp) ──────────────────────────────────────────────
+// ─── Клиент 3: pow(base, exp)
 
 void client_pow(Server<double>& server, int N) {
     std::mt19937 rng(777);
@@ -139,15 +134,12 @@ void client_pow(Server<double>& server, int N) {
     std::cout << "[Client 3] pow:  " << N << " tasks → client3_pow.txt\n";
 }
 
-// ─── main ──────────────────────────────────────────────────────────────────
-
 int main() {
     const int N = 100;  // 5 < N < 10000
 
     Server<double> server;
     server.start();
 
-    // Три клиента — три отдельных потока
     std::thread t1(client_sin,  std::ref(server), N);
     std::thread t2(client_sqrt, std::ref(server), N);
     std::thread t3(client_pow,  std::ref(server), N);
