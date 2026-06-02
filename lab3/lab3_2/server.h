@@ -14,11 +14,11 @@
 
 class ThreadPool {
 private:
-    std::vector<std::thread>          workers;
+    std::vector<std::thread> workers;
     std::queue<std::function<void()>> jobQueue;
-    std::mutex                        jobMutex;
-    std::condition_variable           cv;
-    std::atomic<bool>                 running{false};
+    std::mutex jobMutex;
+    std::condition_variable cv;
+    std::atomic<bool> running{false};
 
     void workerLoop() {
         while (true) {
@@ -70,9 +70,9 @@ class Server {
 private:
 
     struct Task {
-        size_t              id;
-        std::function<T()>  func;
-        std::promise<T>     promise;   // воркер кладёт сюда результат
+        size_t id;
+        std::function<T()> func;
+        std::promise<T> promise;   // воркер кладёт сюда результат
     };
 
     // Очередь задач, ожидающих выполнения
@@ -83,7 +83,7 @@ private:
     std::mutex resultsMutex;
     std::condition_variable cv;
 
-    std::atomic<bool>   running{false};
+    std::atomic<bool> running{false};
     std::atomic<size_t> nextId{1};
 
     std::unique_ptr<ThreadPool> pool;
@@ -122,7 +122,7 @@ public:
     void start(size_t threadCount = std::thread::hardware_concurrency()) {
         if (running) return;
         running = true;
-        pool           = std::make_unique<ThreadPool>(threadCount);
+        pool = std::make_unique<ThreadPool>(threadCount);
         dispatchThread = std::thread(&Server::dispatchLoop, this);
         std::cout << "[Server] started with ThreadPool(" << threadCount << " threads)\n";
     }
@@ -138,9 +138,9 @@ public:
     size_t add_task(std::function<T()> func) {
         size_t id = nextId++;
 
-        auto task    = std::make_shared<Task>();
-        task->id     = id;
-        task->func   = std::move(func);
+        auto task = std::make_shared<Task>();
+        task->id = id;
+        task->func = std::move(func);
 
         std::future<T> fut = task->promise.get_future();
 
