@@ -12,8 +12,3 @@ add_executable(main main.cpp)
 target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(main PRIVATE Threads::Threads)
-
-# ─── Тестовая программа ────────────────────────────────────────────
-add_executable(test_runner test.cpp)
-
-target_link_libraries(test_runner PRIVATE Threads::Threads)
