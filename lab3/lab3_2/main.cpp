@@ -32,6 +32,7 @@ void client_sin(Server<double>& server, int N) {
     }
 
     std::ofstream file("client1_sin.txt");
+    file << std::fixed << std::setprecision(10);
     file << "ID\targ\tresult\n";
 
     for (auto& [id, arg] : tasks) {
@@ -60,6 +61,7 @@ void client_sqrt(Server<double>& server, int N) {
     }
 
     std::ofstream file("client2_sqrt.txt");
+    file << std::fixed << std::setprecision(10);
     file << "ID\targ\tresult\n";
 
     for (auto& [id, arg] : tasks) {
@@ -90,6 +92,7 @@ void client_pow(Server<double>& server, int N) {
     }
 
     std::ofstream file("client3_pow.txt");
+    file << std::fixed << std::setprecision(10);
     file << "ID\tbase\texp\tresult\n";
 
     for (auto& [id, base, exp] : tasks) {
