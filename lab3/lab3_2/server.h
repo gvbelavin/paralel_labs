@@ -25,14 +25,14 @@ private:
             std::function<void()> job;
             {
                 std::unique_lock<std::mutex> lock(jobMutex);
-                cv.wait(lock, [this]() {
+                cv.wait(lock, [this]() { 
                     return !running || !jobQueue.empty();
                 });
                 if (!running && jobQueue.empty()) return;
                 job = std::move(jobQueue.front());
                 jobQueue.pop();
             }
-            job();  // выполняем задачу вне лока — параллельно между потоками
+            job();
         }
     }
 
@@ -46,7 +46,6 @@ public:
 
     ~ThreadPool() { shutdown(); }
 
-    // Добавить void-задачу в очередь пула
     void submit(std::function<void()> job) {
         {
             std::lock_guard<std::mutex> lock(jobMutex);
@@ -72,10 +71,9 @@ private:
     struct Task {
         size_t id;
         std::function<T()> func;
-        std::promise<T> promise;   // воркер кладёт сюда результат
+        std::promise<T> promise;
     };
 
-    // Очередь задач, ожидающих выполнения
     std::queue<std::shared_ptr<Task>> taskQueue;
     std::unordered_map<size_t, std::future<T>> resultFutures;
 
@@ -118,7 +116,6 @@ public:
     Server() = default;
     ~Server() { stop(); }
 
-    // threadCount — сколько потоков в пуле
     void start(size_t threadCount = std::thread::hardware_concurrency()) {
         if (running) return;
         running = true;

@@ -22,8 +22,6 @@ T fun_pow(T base, T exp) {
     return std::pow(base, exp);
 }
 
-// ─── Клиент 1: sin(x)
-
 void client_sin(Server<double>& server, int N) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> dist(-3.14159265, 3.14159265);
@@ -40,19 +38,11 @@ void client_sin(Server<double>& server, int N) {
     }
 
     std::ofstream file("client1_sin.txt");
-    file << std::fixed << std::setprecision(10);
-    file << "=== CLIENT 1: sin(x) ===\n";
-    file << std::left
-         << std::setw(8)  << "ID"
-         << std::setw(22) << "arg x"
-         << "sin(x) result\n";
-    file << std::string(55, '-') << "\n";
+    file << "ID\targ\tresult\n";
 
     for (auto& [id, arg] : tasks) {
         double result = server.request_result(id);
-        file << std::setw(8)  << id
-             << std::setw(22) << arg
-             << result << "\n";
+        file << id << "\t" << arg << "\t" << result << "\n";
     }
 
     std::cout << "[Client 1] sin:  " << N << " tasks in client1_sin.txt\n";
@@ -76,19 +66,11 @@ void client_sqrt(Server<double>& server, int N) {
     }
 
     std::ofstream file("client2_sqrt.txt");
-    file << std::fixed << std::setprecision(10);
-    file << "=== CLIENT 2: sqrt(x) ===\n";
-    file << std::left
-         << std::setw(8)  << "ID"
-         << std::setw(22) << "arg x"
-         << "sqrt(x) result\n";
-    file << std::string(55, '-') << "\n";
+    file << "ID\targ\tresult\n";
 
     for (auto& [id, arg] : tasks) {
         double result = server.request_result(id);
-        file << std::setw(8)  << id
-             << std::setw(22) << arg
-             << result << "\n";
+        file << id << "\t" << arg << "\t" << result << "\n";
     }
 
     std::cout << "[Client 2] sqrt: " << N << " tasks in client2_sqrt.txt\n";
@@ -114,28 +96,17 @@ void client_pow(Server<double>& server, int N) {
     }
 
     std::ofstream file("client3_pow.txt");
-    file << std::fixed << std::setprecision(10);
-    file << "=== CLIENT 3: pow(base, exp) ===\n";
-    file << std::left
-         << std::setw(8)  << "ID"
-         << std::setw(22) << "base"
-         << std::setw(22) << "exp"
-         << "pow(base,exp) result\n";
-    file << std::string(74, '-') << "\n";
+    file << "ID\tbase\texp\tresult\n";
 
     for (auto& [id, base, exp] : tasks) {
         double result = server.request_result(id);
-        file << std::setw(8)  << id
-             << std::setw(22) << base
-             << std::setw(22) << exp
-             << result << "\n";
+        file << id << "\t" << base << "\t" << exp << "\t" << result << "\n";
     }
 
     std::cout << "[Client 3] pow:  " << N << " tasks in client3_pow.txt\n";
 }
-
 int main() {
-    const int N = 100;  // 5 < N < 10000
+    const int N = 100;
 
     Server<double> server;
     server.start();
