@@ -7,20 +7,14 @@
 #include <iomanip>
 #include "server.h"
 
-template <typename T>
-T fun_sin(T arg) {
-    return std::sin(arg);
-}
+template <typename Scalar>
+Scalar fun_sin(Scalar arg) { return std::sin(arg); }
 
-template <typename T>
-T fun_sqrt(T arg) {
-    return std::sqrt(std::abs(arg));
-}
+template <typename Scalar>
+Scalar fun_sqrt(Scalar arg) { return std::sqrt(std::abs(arg)); }
 
-template <typename T>
-T fun_pow(T base, T exp) {
-    return std::pow(base, exp);
-}
+template <typename Scalar>
+Scalar fun_pow(Scalar base, Scalar exp) { return std::pow(base, exp); }
 
 void client_sin(Server<double>& server, int N) {
     std::mt19937 rng(42);
