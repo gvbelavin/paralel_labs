@@ -1,16 +1,19 @@
 #pragma once
 
+#include <vector>
 #include <queue>
 #include <thread>
-#include <vector>
 #include <mutex>
 #include <condition_variable>
-#include <unordered_map>
 #include <functional>
-#include <future>
-#include <memory>
 #include <atomic>
+#include <future>
+#include <unordered_map>
+#include <memory>
 #include <stdexcept>
+#include <iostream>
+
+// ─── ThreadPool ───────────────────────────────────────────────────────────────
 
 class ThreadPool {
 private:
@@ -25,7 +28,7 @@ private:
             std::function<void()> job;
             {
                 std::unique_lock<std::mutex> lock(jobMutex);
-                cv.wait(lock, [this]() { 
+                cv.wait(lock, [this]() {
                     return !running || !jobQueue.empty();
                 });
                 if (!running && jobQueue.empty()) return;
@@ -64,6 +67,8 @@ public:
     }
 };
 
+// ─── Server ───────────────────────────────────────────────────────────────────
+
 template <typename T>
 class Server {
 private:
@@ -85,7 +90,6 @@ private:
     std::atomic<size_t> nextId{1};
 
     std::unique_ptr<ThreadPool> pool;
-
     std::thread dispatchThread;
 
     void dispatchLoop() {
@@ -100,7 +104,6 @@ private:
                 task = std::move(taskQueue.front());
                 taskQueue.pop();
             }
-
             pool->submit([task]() {
                 try {
                     T result = task->func();
@@ -140,7 +143,6 @@ public:
         task->func = std::move(func);
 
         std::future<T> fut = task->promise.get_future();
-
         {
             std::lock_guard<std::mutex> lock(resultsMutex);
             resultFutures.emplace(id, std::move(fut));
@@ -149,7 +151,6 @@ public:
             std::lock_guard<std::mutex> lock(queueMutex);
             taskQueue.push(std::move(task));
         }
-
         cv.notify_one();
         return id;
     }
@@ -164,5 +165,6 @@ public:
             fut = std::move(it->second);
             resultFutures.erase(it);
         }
-        return fut.get();                   
+        return fut.get();
+    }
 };
