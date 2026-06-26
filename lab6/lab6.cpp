@@ -1,10 +1,10 @@
+#include <boost/program_options.hpp>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <vector>
-#include <cmath>
-#include <algorithm>
-#include <iomanip>
-#include <chrono>
-#include <boost/program_options.hpp>
 
 namespace po = boost::program_options;
 
@@ -13,34 +13,24 @@ double lerp(double v0, double v1, double t) {
 }
 
 void init_grid(std::vector<double>& grid, int N) {
-    const double top_left = 10.0;
-    const double top_right = 20.0;
-    const double bottom_right = 30.0;
-    const double bottom_left = 20.0;
-
     std::fill(grid.begin(), grid.end(), 0.0);
-
     for (int i = 0; i < N; ++i) {
         double t = static_cast<double>(i) / (N - 1);
-
-        grid[i] = lerp(top_left, top_right, t);
-        grid[(N - 1) * N + i] = lerp(bottom_left, bottom_right, t);
-        grid[i * N] = lerp(top_left, bottom_left, t);
-        grid[i * N + (N - 1)] = lerp(top_right, bottom_right, t);
+        grid[i]             = lerp(10.0, 20.0, t);
+        grid[(N-1)*N + i]   = lerp(20.0, 30.0, t);
+        grid[i*N]           = lerp(10.0, 20.0, t);
+        grid[i*N + (N-1)]   = lerp(20.0, 30.0, t);
     }
 }
 
 void print_grid(const std::vector<double>& grid, int N) {
     if (N > 13) return;
-
-    std::cout << "\nGrid state (" << N << "x" << N << "):\n";
+    std::cout << "\nGrid (" << N << "x" << N << "):\n";
     for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            std::cout << std::fixed << std::setprecision(2) << std::setw(6) << grid[i * N + j] << " ";
-        }
+        for (int j = 0; j < N; ++j)
+            std::cout << std::fixed << std::setprecision(2) << std::setw(6) << grid[i*N+j] << " ";
         std::cout << "\n";
     }
-    std::cout << "\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -49,98 +39,76 @@ int main(int argc, char* argv[]) {
     int max_iter = 1000000;
 
     try {
-        po::options_description desc("Разрешенные опции");
+        po::options_description desc("Опции");
         desc.add_options()
-            ("help,h", "Вывести справочное сообщение")
-            ("size,n", po::value<int>(&N)->default_value(128), "Размер сетки (N x N)")
-            ("tol,t", po::value<double>(&tol)->default_value(1e-6), "Требуемая точность")
-            ("iter,i", po::value<int>(&max_iter)->default_value(1000000), "Максимальное число итераций");
-
+            ("help,h",  "Справка")
+            ("size,n",  po::value<int>(&N)->default_value(128),       "Размер сетки N")
+            ("tol,t",   po::value<double>(&tol)->default_value(1e-6), "Точность")
+            ("iter,i",  po::value<int>(&max_iter)->default_value(1000000), "Макс. итераций");
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
-
-        if (vm.count("help")) {
-            std::cout << desc << "\n";
-            return 0;
-        }
+        if (vm.count("help")) { std::cout << desc; return 0; }
     } catch (std::exception& e) {
-        std::cerr << "Ошибка парсинга аргументов: " << e.what() << "\n";
-        return 1;
+        std::cerr << "Ошибка: " << e.what() << "\n"; return 1;
     }
 
-    std::vector<double> grid(N * N);
-    std::vector<double> new_grid(N * N);
-
+    std::vector<double> grid(N * N), new_grid(N * N);
     init_grid(grid, N);
     init_grid(new_grid, N);
+
+    // Берём сырые указатели ДО acc data — компилятор видит их как стабильные адреса
+    double* __restrict__ g  = grid.data();
+    double* __restrict__ ng = new_grid.data();
+    int sz = N * N;
 
     int iter = 0;
     double error = 1.0;
 
-    // Начинаем замер времени
     auto start = std::chrono::steady_clock::now();
 
-    // === КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ: объединяем вычисление и ошибку в один kernel ===
-    // Используем указатели для swap без копирования данных
-    double* curr = grid.data();
-    double* next = new_grid.data();
-
-    #pragma acc data copy(curr[0:N*N], next[0:N*N])
+    #pragma acc data copy(g[0:sz]) create(ng[0:sz])
     {
         while (error > tol && iter < max_iter) {
             error = 0.0;
 
-            // ОДИН kernel: вычисляем новые значения И максимальную ошибку
-            // Используем локальную переменную для reduction, чтобы избежать лишних синхронизаций
-            #pragma acc parallel loop collapse(2) reduction(max:error) present(curr[0:N*N], next[0:N*N])
+            #pragma acc parallel loop collapse(2) reduction(max:error) \
+                present(g[0:sz], ng[0:sz])
             for (int i = 1; i < N - 1; ++i) {
                 for (int j = 1; j < N - 1; ++j) {
-                    int idx = i * N + j;
-                    double new_val = 0.25 * (
-                        curr[(i - 1) * N + j] +
-                        curr[(i + 1) * N + j] +
-                        curr[i * N + (j - 1)] +
-                        curr[i * N + (j + 1)]
-                    );
-                    next[idx] = new_val;
-                    
-                    double diff = new_val - curr[idx];
-                    diff = (diff > 0.0) ? diff : -diff;
-                    if (diff > error) error = diff;
+                    ng[i*N+j] = 0.25 * (g[(i-1)*N+j] + g[(i+1)*N+j] +
+                                        g[i*N+j-1]   + g[i*N+j+1]);
+                    double d = ng[i*N+j] - g[i*N+j];
+                    if (d < 0.0) d = -d;
+                    if (d > error) error = d;
                 }
             }
 
-            // Swap указателей на GPU (без копирования данных!)
-            #pragma acc serial present(curr[0:N*N], next[0:N*N])
-            {
-                double* tmp = curr;
-                curr = next;
-                next = tmp;
-            }
+            // Копируем ng -> g целиком на GPU, без выхода на хост
+            #pragma acc parallel loop present(g[0:sz], ng[0:sz])
+            for (int k = 0; k < sz; ++k)
+                g[k] = ng[k];
 
-            iter++;
+            ++iter;
         }
-    }
+    } // здесь g копируется обратно в grid на хост
 
     auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end - start;
+    std::chrono::duration<double> elapsed = end - start;
 
-    // Определяем, где актуальные данные (после swap)
-    const double* result_ptr = (iter % 2 == 0) ? grid.data() : new_grid.data();
+    std::cout << "Итераций: " << iter << "\n"
+              << "Ошибка:   " << std::scientific << error << "\n"
+              << "Время:    " << std::fixed << std::setprecision(6) << elapsed.count() << " сек\n";
 
-    std::cout << "Количество итераций: " << iter << "\n";
-    std::cout << "Достигнутая ошибка: " << std::scientific << error << "\n";
-    std::cout << "Время выполнения: " << std::fixed << std::setprecision(6) << elapsed_seconds.count() << " сек\n";
+    if (N == 10 || N == 13)
+        print_grid(grid, N);
 
-    if (N == 10 || N == 13) {
-        // Для печати нужно скопировать результат обратно, если он в new_grid
-        if (iter % 2 != 0) {
-            std::copy(new_grid.begin(), new_grid.end(), grid.begin());
-            print_grid(grid, N);
-        } else {
-            print_grid(grid, N);
-        }
+    // Сохранить матрицу в файл
+    std::ofstream out("result_matrix.txt");
+    out << std::fixed << std::setprecision(10);
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j)
+            out << grid[i*N+j] << (j+1==N ? "\n" : " ");
     }
 
     return 0;
