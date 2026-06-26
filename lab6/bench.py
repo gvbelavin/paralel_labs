@@ -4,22 +4,24 @@ import re
 import sys
 
 SIZES = [128, 256, 512, 1024]
-TOL = "1e-6"
+EPS = "1e-6"
 MAX_ITER = 1000000
+CHECK_INTERVALS = [1, 100]
+BUILD_DIR = "./build"
 
 EXECUTABLES = {
-    "CPU-onecore": "./build-host/task6",
-    "CPU-multicore": "./build-multicore/task6",
-    "GPU": "./build-gpu/task6",
+    "CPU-onecore": os.path.join(BUILD_DIR, "heat_host"),
+    "CPU-multicore": os.path.join(BUILD_DIR, "heat_multicore"),
+    "GPU": os.path.join(BUILD_DIR, "heat_gpu"),
 }
 
 TIME_PATTERNS = [
-    r"Время выполнения:\s*([0-9eE+\-.]+)",
+    r"Time:\s*([0-9eE+\-.]+)",
+    r"Время(?: выполнения)?:\s*([0-9eE+\-.]+)",
     r"Your calculations took\s*([0-9eE+\-.]+)",
-    r"Время:\s*([0-9eE+\-.]+)",
 ]
-ITER_PATTERN = r"Количество итераций:\s*(\d+)"
-ERROR_PATTERN = r"Достигнутая ошибка:\s*([0-9eE+\-.]+)"
+ITER_PATTERN = r"Iterations:\s*(\d+)"
+ERROR_PATTERN = r"Error:\s*([0-9eE+\-.]+)"
 
 
 def parse_value(patterns, text, cast_func, field_name):
@@ -32,23 +34,38 @@ def parse_value(patterns, text, cast_func, field_name):
     raise ValueError(f"Не удалось найти поле '{field_name}' в выводе программы")
 
 
-def run_test(label, executable, size):
+def build_command(executable, size, check_interval):
+    return [
+        executable,
+        "--size", str(size),
+        "--eps", EPS,
+        "--iter", str(MAX_ITER),
+        "--check", str(check_interval),
+    ]
+
+
+def run_test(label, executable, size, check_interval):
     if not os.path.exists(executable):
         print(f"Не найден исполняемый файл для режима {label}: {executable}")
         return None
 
-    cmd = [executable, "--size", str(size), "--tol", TOL, "--iter", str(MAX_ITER)]
-    print(f"Запуск ({label}): {' '.join(cmd)}")
+    cmd = build_command(executable, size, check_interval)
+    print(f"Запуск ({label}, check={check_interval}): {' '.join(cmd)}")
+
+    env = os.environ.copy()
+    if label == "CPU-multicore":
+        env.setdefault("OMP_NUM_THREADS", "20")
+        env.setdefault("ACC_NUM_CORES", "20")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
         stdout = result.stdout
 
         elapsed = parse_value(TIME_PATTERNS, stdout, float, "время")
         iterations = parse_value(ITER_PATTERN, stdout, int, "итерации")
         error = parse_value(ERROR_PATTERN, stdout, float, "ошибка")
 
-        print(f"    Время: {elapsed:.6f} сек | Итерации: {iterations} | Ошибка: {error:.6e}")
+        print(f" Время: {elapsed:.6f} сек | Итерации: {iterations} | Ошибка: {error:.6e}")
         return {
             "time": elapsed,
             "iterations": iterations,
@@ -67,15 +84,15 @@ def run_test(label, executable, size):
 
 
 def print_section_header(title):
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 90)
     print(title)
-    print("=" * 80)
+    print("=" * 90)
 
 
-def print_mode_table(mode_name, rows):
-    print_section_header(mode_name)
-    print(f"{'Размер сетки':<12} | {'Время (с)':<14} | {'Точность':<14} | {'Итерации':<12}")
-    print("-" * 80)
+def print_mode_table(mode_name, rows, check_interval):
+    print_section_header(f"{mode_name} | check={check_interval}")
+    print(f"{'Размер сетки':<12} | {'Время (с)':<14} | {'Ошибка':<14} | {'Итерации':<12}")
+    print("-" * 90)
     for size in SIZES:
         row = rows.get(size)
         if row is None:
@@ -91,39 +108,49 @@ def print_mode_table(mode_name, rows):
 
 def print_raw_arrays(results):
     print(f"SIZES = {SIZES}")
-    for mode_name in EXECUTABLES:
-        mode_rows = results[mode_name]
-        times = [round(mode_rows[s]["time"], 6) if s in mode_rows else None for s in SIZES]
-        errors = [mode_rows[s]["error"] if s in mode_rows else None for s in SIZES]
-        iterations = [mode_rows[s]["iterations"] if s in mode_rows else None for s in SIZES]
-        key = mode_name.replace('-', '_').replace(' ', '_').upper()
-        print(f"{key}_TIMES = {times}")
-        print(f"{key}_ERRORS = {errors}")
-        print(f"{key}_ITERATIONS = {iterations}")
+    for check_interval in CHECK_INTERVALS:
+        print(f"CHECK_INTERVAL = {check_interval}")
+        for mode_name in EXECUTABLES:
+            mode_rows = results[check_interval][mode_name]
+            times = [round(mode_rows[s]["time"], 6) if s in mode_rows else None for s in SIZES]
+            errors = [mode_rows[s]["error"] if s in mode_rows else None for s in SIZES]
+            iterations = [mode_rows[s]["iterations"] if s in mode_rows else None for s in SIZES]
+            key = mode_name.replace('-', '_').replace(' ', '_').upper()
+            print(f"{key}_TIMES = {times}")
+            print(f"{key}_ERRORS = {errors}")
+            print(f"{key}_ITERATIONS = {iterations}")
 
 
 def main():
-    results = {mode_name: {} for mode_name in EXECUTABLES}
+    results = {
+        check_interval: {mode_name: {} for mode_name in EXECUTABLES}
+        for check_interval in CHECK_INTERVALS
+    }
 
-    print_section_header("Запуск бенчмарка Task 6")
+    print_section_header("Запуск бенчмарка heat.cpp")
     print(f"Размеры сеток: {SIZES}")
-    print(f"Точность: {TOL}")
+    print(f"Точность: {EPS}")
     print(f"Максимум итераций: {MAX_ITER}")
+    print(f"check_interval: {CHECK_INTERVALS}")
+    print(f"Исполняемые файлы: {EXECUTABLES}")
 
-    for size in SIZES:
-        print_section_header(f"Сетка {size}x{size}")
-        for mode_name, executable in EXECUTABLES.items():
-            test_result = run_test(mode_name, executable, size)
-            if test_result is not None:
-                results[mode_name][size] = test_result
+    for check_interval in CHECK_INTERVALS:
+        for size in SIZES:
+            print_section_header(f"Сетка {size}x{size} | check={check_interval}")
+            for mode_name, executable in EXECUTABLES.items():
+                test_result = run_test(mode_name, executable, size, check_interval)
+                if test_result is not None:
+                    results[check_interval][mode_name][size] = test_result
 
-    for mode_name in EXECUTABLES:
-        print_mode_table(mode_name, results[mode_name])
+    for check_interval in CHECK_INTERVALS:
+        for mode_name in EXECUTABLES:
+            print_mode_table(mode_name, results[check_interval][mode_name], check_interval)
 
     print_raw_arrays(results)
+
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        sys.exit("\n Прервано пользователем")
+        sys.exit("\nПрервано пользователем")
