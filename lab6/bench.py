@@ -4,6 +4,11 @@ import re
 import sys
 
 SIZES = [128, 256, 512, 1024]
+MODE_SIZES = {
+    "CPU-onecore": [128, 256, 512],
+    "CPU-multicore": [128, 256, 512, 1024],
+    "GPU": [128, 256, 512, 1024],
+}
 EPS = "1e-6"
 MAX_ITER = 1000000
 CHECK_INTERVALS = [1, 100]
@@ -93,7 +98,11 @@ def print_mode_table(mode_name, rows, check_interval):
     print_section_header(f"{mode_name} | check={check_interval}")
     print(f"{'Размер сетки':<12} | {'Время (с)':<14} | {'Ошибка':<14} | {'Итерации':<12}")
     print("-" * 90)
+    allowed_sizes = set(MODE_SIZES[mode_name])
     for size in SIZES:
+        if size not in allowed_sizes:
+            print(f"{size}x{size:<7} | {'SKIPPED':<14} | {'SKIPPED':<14} | {'SKIPPED':<12}")
+            continue
         row = rows.get(size)
         if row is None:
             print(f"{size}x{size:<7} | {'ERROR':<14} | {'ERROR':<14} | {'ERROR':<12}")
@@ -108,6 +117,7 @@ def print_mode_table(mode_name, rows, check_interval):
 
 def print_raw_arrays(results):
     print(f"SIZES = {SIZES}")
+    print(f"MODE_SIZES = {MODE_SIZES}")
     for check_interval in CHECK_INTERVALS:
         print(f"CHECK_INTERVAL = {check_interval}")
         for mode_name in EXECUTABLES:
@@ -129,15 +139,16 @@ def main():
 
     print_section_header("Запуск бенчмарка heat.cpp")
     print(f"Размеры сеток: {SIZES}")
+    print(f"Режимы и размеры: {MODE_SIZES}")
     print(f"Точность: {EPS}")
     print(f"Максимум итераций: {MAX_ITER}")
     print(f"check_interval: {CHECK_INTERVALS}")
     print(f"Исполняемые файлы: {EXECUTABLES}")
 
     for check_interval in CHECK_INTERVALS:
-        for size in SIZES:
-            print_section_header(f"Сетка {size}x{size} | check={check_interval}")
-            for mode_name, executable in EXECUTABLES.items():
+        for mode_name, executable in EXECUTABLES.items():
+            for size in MODE_SIZES[mode_name]:
+                print_section_header(f"Сетка {size}x{size} | {mode_name} | check={check_interval}")
                 test_result = run_test(mode_name, executable, size, check_interval)
                 if test_result is not None:
                     results[check_interval][mode_name][size] = test_result
