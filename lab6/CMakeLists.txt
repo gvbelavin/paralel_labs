@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(Boost REQUIRED COMPONENTS program_options)
 
-set(SRC ${CMAKE_SOURCE_DIR}/heat.cpp)
+set(SRC ${CMAKE_SOURCE_DIR}/lab6.cpp)
 set(PGC_FLAGS -fast -Minfo=all)
 
 # ---------- GPU ----------
