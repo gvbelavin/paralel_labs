@@ -80,18 +80,17 @@ int main(int argc, char* argv[]) {
 
     int iter = 0;
     double error = 1.0;
-    const int check_step = 100; // Проверяем ошибку (с пересылкой на CPU) лишь каждые 100 итераций
 
-    // Начинаем замер времени через chrono
+    // Начинаем замер времени
     auto start = std::chrono::steady_clock::now();
 
     #pragma acc data copy(d_grid[0:N*N], d_new_grid[0:N*N])
     {
         while (error > tol && iter < max_iter) {
-            
-            // ЭТАП 2: Убираем избыточную синхронизацию ошибки
-            if (iter % check_step == 0) {
-                error = 0.0;
+            error = 0.0;
+
+            if (iter % 2 == 0) {
+                // Итерация 0, 2, 4... Читаем из d_grid, пишем в d_new_grid
                 #pragma acc parallel loop collapse(2) reduction(max:error) present(d_grid[0:N*N], d_new_grid[0:N*N])
                 for (int i = 1; i < N - 1; ++i) {
                     for (int j = 1; j < N - 1; ++j) {
@@ -102,7 +101,7 @@ int main(int argc, char* argv[]) {
                             d_grid[i * N + (j + 1)]   // право
                         );
                         d_new_grid[i * N + j] = new_val;
-
+                        
                         double diff = std::abs(new_val - d_grid[i * N + j]);
                         if (diff > error) {
                             error = diff;
@@ -110,22 +109,26 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else {
-                // Быстрая итерация без reduction(max:error), видеокарта не синхронизируется с CPU
-                #pragma acc parallel loop collapse(2) present(d_grid[0:N*N], d_new_grid[0:N*N])
+                // Итерация 1, 3, 5... Читаем из d_new_grid, пишем в d_grid
+                #pragma acc parallel loop collapse(2) reduction(max:error) present(d_grid[0:N*N], d_new_grid[0:N*N])
                 for (int i = 1; i < N - 1; ++i) {
                     for (int j = 1; j < N - 1; ++j) {
-                        d_new_grid[i * N + j] = 0.25 * (
-                            d_grid[(i - 1) * N + j] + 
-                            d_grid[(i + 1) * N + j] + 
-                            d_grid[i * N + (j - 1)] + 
-                            d_grid[i * N + (j + 1)]   
+                        double new_val = 0.25 * (
+                            d_new_grid[(i - 1) * N + j] + // верх
+                            d_new_grid[(i + 1) * N + j] + // низ
+                            d_new_grid[i * N + (j - 1)] + // лево
+                            d_new_grid[i * N + (j + 1)]   // право
                         );
+                        d_grid[i * N + j] = new_val;
+                        
+                        double diff = std::abs(new_val - d_new_grid[i * N + j]);
+                        if (diff > error) {
+                            error = diff;
+                        }
                     }
                 }
             }
 
-            // ЭТАП 1: Вместо глубокого копирования всего массива, просто меняем указатели
-            std::swap(d_grid, d_new_grid);
             iter++;
         }
     }
@@ -133,12 +136,14 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
 
-    const std::vector<double>& result_grid = (d_grid == grid.data()) ? grid : new_grid;
+    // В конце определяем, где лежат актуальные данные (в grid или в new_grid)
+    const std::vector<double>& result_grid = (iter % 2 == 0) ? grid : new_grid;
 
     std::cout << "Количество итераций: " << iter << "\n";
     std::cout << "Достигнутая ошибка: " << std::scientific << error << "\n";
-    std::cout << "Время выполнения: " << std::fixed << elapsed_seconds.count() << " сек\n";
+    std::cout << "Время выполнения: " << std::fixed << std::setprecision(6) << elapsed_seconds.count() << " сек\n";
 
+    // Выводим сетку для маленьких размеров
     if (N == 10 || N == 13) {
         print_grid(result_grid, N);
     }
