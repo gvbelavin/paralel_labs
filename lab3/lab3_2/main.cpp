@@ -43,7 +43,6 @@ void client_sin(Server<double>& server, int N) {
     std::cout << "[Client 1] sin:  " << N << " tasks in client1_sin.txt\n";
 }
 
-// ─── Клиент 2: sqrt(x)
 
 void client_sqrt(Server<double>& server, int N) {
     std::mt19937 rng(123);
@@ -72,7 +71,6 @@ void client_sqrt(Server<double>& server, int N) {
     std::cout << "[Client 2] sqrt: " << N << " tasks in client2_sqrt.txt\n";
 }
 
-// ─── Клиент 3: pow(base, exp)
 
 void client_pow(Server<double>& server, int N) {
     std::mt19937 rng(777);

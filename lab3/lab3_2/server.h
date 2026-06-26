@@ -13,8 +13,6 @@
 #include <stdexcept>
 #include <iostream>
 
-// ─── ThreadPool ───────────────────────────────────────────────────────────────
-
 class ThreadPool {
 private:
     std::vector<std::thread> workers;
@@ -66,8 +64,6 @@ public:
         workers.clear();
     }
 };
-
-// ─── Server ───────────────────────────────────────────────────────────────────
 
 template <typename T>
 class Server {
