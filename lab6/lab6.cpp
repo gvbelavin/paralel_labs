@@ -75,66 +75,48 @@ int main(int argc, char* argv[]) {
     init_grid(grid, N);
     init_grid(new_grid, N);
 
-    double* d_grid = grid.data();
-    double* d_new_grid = new_grid.data();
-
     int iter = 0;
     double error = 1.0;
 
     // Начинаем замер времени
     auto start = std::chrono::steady_clock::now();
 
-    #pragma acc data copy(d_grid[0:N*N], d_new_grid[0:N*N])
+    // === КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ: объединяем вычисление и ошибку в один kernel ===
+    // Используем указатели для swap без копирования данных
+    double* curr = grid.data();
+    double* next = new_grid.data();
+
+    #pragma acc data copy(curr[0:N*N], next[0:N*N])
     {
         while (error > tol && iter < max_iter) {
             error = 0.0;
 
-            if (iter % 2 == 0) {
-                // Итерация 0, 2, 4... Читаем из d_grid, пишем в d_new_grid
-                #pragma acc parallel loop collapse(2) present(d_grid[0:N*N], d_new_grid[0:N*N])
-                for (int i = 1; i < N - 1; ++i) {
-                    for (int j = 1; j < N - 1; ++j) {
-                        d_new_grid[i * N + j] = 0.25 * (
-                            d_grid[(i - 1) * N + j] +
-                            d_grid[(i + 1) * N + j] +
-                            d_grid[i * N + (j - 1)] +
-                            d_grid[i * N + (j + 1)]
-                        );
-                    }
+            // ОДИН kernel: вычисляем новые значения И максимальную ошибку
+            // Используем локальную переменную для reduction, чтобы избежать лишних синхронизаций
+            #pragma acc parallel loop collapse(2) reduction(max:error) present(curr[0:N*N], next[0:N*N])
+            for (int i = 1; i < N - 1; ++i) {
+                for (int j = 1; j < N - 1; ++j) {
+                    int idx = i * N + j;
+                    double new_val = 0.25 * (
+                        curr[(i - 1) * N + j] +
+                        curr[(i + 1) * N + j] +
+                        curr[i * N + (j - 1)] +
+                        curr[i * N + (j + 1)]
+                    );
+                    next[idx] = new_val;
+                    
+                    double diff = new_val - curr[idx];
+                    diff = (diff > 0.0) ? diff : -diff;
+                    if (diff > error) error = diff;
                 }
-                
-                // Отдельный цикл для ошибки (PGI компилятор так лучше векторизует)
-                #pragma acc parallel loop collapse(2) reduction(max:error) present(d_grid[0:N*N], d_new_grid[0:N*N])
-                for (int i = 1; i < N - 1; ++i) {
-                    for (int j = 1; j < N - 1; ++j) {
-                        double diff = d_new_grid[i * N + j] - d_grid[i * N + j];
-                        diff = (diff > 0.0) ? diff : -diff; // вместо std::abs
-                        if (diff > error) error = diff;
-                    }
-                }
-            } else {
-                // Итерация 1, 3, 5... Читаем из d_new_grid, пишем в d_grid
-                #pragma acc parallel loop collapse(2) present(d_grid[0:N*N], d_new_grid[0:N*N])
-                for (int i = 1; i < N - 1; ++i) {
-                    for (int j = 1; j < N - 1; ++j) {
-                        d_grid[i * N + j] = 0.25 * (
-                            d_new_grid[(i - 1) * N + j] +
-                            d_new_grid[(i + 1) * N + j] +
-                            d_new_grid[i * N + (j - 1)] +
-                            d_new_grid[i * N + (j + 1)]
-                        );
-                    }
-                }
-                
-                // Отдельный цикл для ошибки
-                #pragma acc parallel loop collapse(2) reduction(max:error) present(d_grid[0:N*N], d_new_grid[0:N*N])
-                for (int i = 1; i < N - 1; ++i) {
-                    for (int j = 1; j < N - 1; ++j) {
-                        double diff = d_grid[i * N + j] - d_new_grid[i * N + j];
-                        diff = (diff > 0.0) ? diff : -diff; // вместо std::abs
-                        if (diff > error) error = diff;
-                    }
-                }
+            }
+
+            // Swap указателей на GPU (без копирования данных!)
+            #pragma acc serial present(curr[0:N*N], next[0:N*N])
+            {
+                double* tmp = curr;
+                curr = next;
+                next = tmp;
             }
 
             iter++;
@@ -144,15 +126,21 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
 
-    // В конце определяем, где лежат актуальные данные
-    const std::vector<double>& result_grid = (iter % 2 == 0) ? grid : new_grid;
+    // Определяем, где актуальные данные (после swap)
+    const double* result_ptr = (iter % 2 == 0) ? grid.data() : new_grid.data();
 
     std::cout << "Количество итераций: " << iter << "\n";
     std::cout << "Достигнутая ошибка: " << std::scientific << error << "\n";
     std::cout << "Время выполнения: " << std::fixed << std::setprecision(6) << elapsed_seconds.count() << " сек\n";
 
     if (N == 10 || N == 13) {
-        print_grid(result_grid, N);
+        // Для печати нужно скопировать результат обратно, если он в new_grid
+        if (iter % 2 != 0) {
+            std::copy(new_grid.begin(), new_grid.end(), grid.begin());
+            print_grid(grid, N);
+        } else {
+            print_grid(grid, N);
+        }
     }
 
     return 0;
