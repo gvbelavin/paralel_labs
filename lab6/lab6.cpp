@@ -1,12 +1,11 @@
-#include <iostream>
+#include <boost/program_options.hpp>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <chrono>
-#include <string>
+#include <iostream>
 #include <memory>
-#include <utility>
-#include <boost/program_options.hpp>
+#include <string>
 
 #ifdef USE_NVTX
 #include <nvtx3/nvToolsExt.h>
@@ -42,11 +41,9 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    const long long size = (long long)N * N;
+    const long long size = 1LL * N * N;
     const long long total = 2LL * size;
 
-    // Double buffer: buf[0..size-1] = A, buf[size..2*size-1] = Anew
-    // cur/nxt are offsets; std::swap(cur,nxt) replaces the copy loop
     auto buf_owner = std::make_unique<double[]>(total);
     double* buf = buf_owner.get();
     long long cur = 0, nxt = size;
@@ -56,59 +53,83 @@ int main(int argc, char* argv[]) {
     NVTX_PUSH("init");
 
     for (int j = 0; j < N; j++) {
-        buf[cur + 0*N + j]     = TL + (TR - TL) * j / (N - 1);
-        buf[cur + (N-1)*N + j] = BL + (BR - BL) * j / (N - 1);
-        buf[nxt + 0*N + j]     = buf[cur + 0*N + j];
-        buf[nxt + (N-1)*N + j] = buf[cur + (N-1)*N + j];
+        buf[cur + 0 * N + j] = TL + (TR - TL) * j / (N - 1);
+        buf[cur + (N - 1) * N + j] = BL + (BR - BL) * j / (N - 1);
+
+        buf[nxt + 0 * N + j] = buf[cur + 0 * N + j];
+        buf[nxt + (N - 1) * N + j] = buf[cur + (N - 1) * N + j];
     }
+
     for (int i = 1; i < N - 1; i++) {
-        buf[cur + i*N + 0]     = TL + (BL - TL) * i / (N - 1);
-        buf[cur + i*N + (N-1)] = TR + (BR - TR) * i / (N - 1);
-        buf[nxt + i*N + 0]     = buf[cur + i*N + 0];
-        buf[nxt + i*N + (N-1)] = buf[cur + i*N + (N-1)];
+        buf[cur + i * N + 0] = TL + (BL - TL) * i / (N - 1);
+        buf[cur + i * N + (N - 1)] = TR + (BR - TR) * i / (N - 1);
+
+        buf[nxt + i * N + 0] = buf[cur + i * N + 0];
+        buf[nxt + i * N + (N - 1)] = buf[cur + i * N + (N - 1)];
+    }
+
+    for (int i = 1; i < N - 1; i++) {
+        for (int j = 1; j < N - 1; j++) {
+            buf[cur + i * N + j] = 0.0;
+            buf[nxt + i * N + j] = 0.0;
+        }
     }
 
     NVTX_POP();
 
-    std::cout << "Grid: " << N << "x" << N << "  eps=" << std::scientific << eps
-              << "  max_iter=" << max_iter << "  check=" << check_interval << "\n";
+    std::cout << "Grid: " << N << "x" << N
+              << " eps=" << std::scientific << eps
+              << " max_iter=" << max_iter
+              << " check=" << check_interval << "\n";
 
     double error = 1.0;
     int iter = 0;
 
     auto t_start = std::chrono::high_resolution_clock::now();
 
-    #pragma acc data copy(buf[0:total])
+#pragma acc data copy(buf[0:total])
     {
         NVTX_PUSH("jacobi_loop");
 
         while (iter < max_iter && error > eps) {
             NVTX_PUSH("calc");
+
             if (iter % check_interval == 0) {
-                #pragma acc wait(1)  // дождаться завершения всех async-ядер перед редукцией
+#pragma acc wait(1)
                 error = 0.0;
-                #pragma acc parallel loop collapse(2) reduction(max:error)
+
+#pragma acc parallel loop collapse(2) reduction(max:error)
                 for (int i = 1; i < N - 1; i++) {
                     for (int j = 1; j < N - 1; j++) {
-                        double val = 0.25 * (buf[cur + (i-1)*N+j] + buf[cur + (i+1)*N+j] +
-                                             buf[cur + i*N+j-1]   + buf[cur + i*N+j+1]);
-                        buf[nxt + i*N+j] = val;
-                        error = fmax(error, fabs(val - buf[cur + i*N+j]));
+                        double val =
+                            0.25 * (buf[cur + (i - 1) * N + j] +
+                                    buf[cur + (i + 1) * N + j] +
+                                    buf[cur + i * N + j - 1] +
+                                    buf[cur + i * N + j + 1]);
+
+                        buf[nxt + i * N + j] = val;
+                        error = fmax(error, fabs(val - buf[cur + i * N + j]));
                     }
                 }
             } else {
-                #pragma acc parallel loop collapse(2) async(1)
+#pragma acc parallel loop collapse(2) async(1)
                 for (int i = 1; i < N - 1; i++) {
                     for (int j = 1; j < N - 1; j++) {
-                        buf[nxt + i*N+j] = 0.25 * (buf[cur + (i-1)*N+j] + buf[cur + (i+1)*N+j] +
-                                                    buf[cur + i*N+j-1]   + buf[cur + i*N+j+1]);
+                        buf[nxt + i * N + j] =
+                            0.25 * (buf[cur + (i - 1) * N + j] +
+                                    buf[cur + (i + 1) * N + j] +
+                                    buf[cur + i * N + j - 1] +
+                                    buf[cur + i * N + j + 1]);
                     }
                 }
             }
+
             NVTX_POP();
 
-            // Swap src/dst offsets — zero GPU overhead (just two integers on host)
+            NVTX_PUSH("swap");
             std::swap(cur, nxt);
+            NVTX_POP();
+
             iter++;
         }
 
@@ -119,29 +140,32 @@ int main(int argc, char* argv[]) {
     double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
     std::cout << "Iterations: " << iter << "\n"
-              << "Error:      " << std::scientific << std::setprecision(6) << error << "\n"
-              << "Time:       " << std::fixed << std::setprecision(3) << elapsed << " s\n";
+              << "Error: " << std::scientific << std::setprecision(6) << error << "\n"
+              << "Time: " << std::fixed << std::setprecision(3) << elapsed << " s\n";
 
     double* result = buf + cur;
     std::string fname = "result_" + std::to_string(N) + ".txt";
     std::ofstream out(fname);
     out << std::fixed << std::setprecision(6);
+
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
-            out << result[i*N + j];
+            out << result[i * N + j];
             if (j < N - 1) out << " ";
         }
         out << "\n";
     }
+
     out.close();
     std::cout << "Result saved to " << fname << "\n";
 
     if (N <= 13) {
         std::cout << "\nGrid " << N << "x" << N << ":\n";
         std::cout << std::fixed << std::setprecision(4);
+
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N; j++) {
-                std::cout << std::setw(8) << result[i*N + j];
+                std::cout << std::setw(8) << result[i * N + j];
             }
             std::cout << "\n";
         }
